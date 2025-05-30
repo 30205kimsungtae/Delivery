@@ -1,56 +1,55 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-from sklearn.cluster import DBSCAN
-from sklearn.preprocessing import StandardScaler
-import plotly.colors as pc
+from sklearn.cluster import KMeans
+import folium
+from streamlit_folium import st_folium
 
-# 데이터 로드
+st.set_page_config(page_title="배달 위치 K-Means 클러스터링", layout="wide")
+
+st.title("🚚 배달 위치 K-Means 클러스터링 지도")
+st.markdown("구글 스프레드시트 데이터를 불러와 K-Means 군집화 후 지도에 시각화합니다.")
+
+# 구글 스프레드시트 csv 링크 (export?format=csv&gid=숫자 형태)
 sheet_url = "https://docs.google.com/spreadsheets/d/1QN1pWq2dLvLLl3Rejwxa_vIwcGg9pQic9dK6pZC-TT4/export?format=csv&gid=778451492"
 df = pd.read_csv(sheet_url)
 
-st.title("🔧 DBSCAN 군집 시각화 — eps 슬라이더 조절")
+st.subheader("데이터 미리보기")
+st.dataframe(df.head())
 
-coords = df[['Latitude', 'Longitude']].dropna()
-scaler = StandardScaler()
-coords_scaled = scaler.fit_transform(coords)
+# 위도/경도 컬럼명
+lat_col = 'Latitude'
+lon_col = 'Longitude'
 
-# 슬라이더: eps 값 조절 (0.1 ~ 1.0)
-eps_value = st.slider("eps (클러스터 반경) 선택", 0.1, 1.0, 0.4, 0.05)
+# 클러스터 개수 선택
+n_clusters = st.slider("클러스터 개수 선택 (K)", min_value=2, max_value=10, value=3)
 
-# 군집 실행
-db = DBSCAN(eps=eps_value, min_samples=4)
-labels = db.fit_predict(coords_scaled)
-df['cluster'] = labels
+coords = df[[lat_col, lon_col]]
 
-# 군집 개수 출력
-n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-st.markdown(f"🔎 현재 군집 개수: **{n_clusters}**")
+# K-Means 클러스터링
+kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+df['Cluster'] = kmeans.fit_predict(coords)
 
-# 색상 팔레트 설정
-unique_clusters = sorted(set(labels))
-if -1 in unique_clusters:
-    unique_clusters.remove(-1)
+# 지도 중앙 좌표 계산
+center = [df[lat_col].mean(), df[lon_col].mean()]
+m = folium.Map(location=center, zoom_start=12)
 
-colors = pc.qualitative.Dark24
-cluster_color_map = {c: colors[i % len(colors)] for i, c in enumerate(unique_clusters)}
-cluster_color_map[-1] = 'lightgray'  # 이상치 색
+colors = ['red', 'blue', 'green', 'purple', 'orange', 'darkred', 'lightred', 'beige', 'darkblue', 'darkgreen']
 
-df['color'] = df['cluster'].map(cluster_color_map)
+# 마커 추가
+for i, row in df.iterrows():
+    folium.CircleMarker(
+        location=[row[lat_col], row[lon_col]],
+        radius=6,
+        color=colors[int(row['Cluster']) % len(colors)],
+        fill=True,
+        fill_opacity=0.8,
+        popup=f"Cluster {row['Cluster']}"
+    ).add_to(m)
 
-# 시각화
-fig = px.scatter_mapbox(
-    df,
-    lat="Latitude",
-    lon="Longitude",
-    color='color',
-    hover_name="Num",
-    zoom=10,
-    height=650,
-    title=f"DBSCAN 군집 시각화 (eps={eps_value})"
-)
+st.subheader("클러스터링 결과 지도")
+st_folium(m, width=900, height=600)
 
-fig.update_traces(marker=dict(size=12, opacity=1, line=dict(width=1, color='black')))
-fig.update_layout(mapbox_style="open-street-map", margin={"r":0,"t":30,"l":0,"b":0}, showlegend=False)
+st.subheader("클러스터링 결과 데이터")
+st.dataframe(df)
 
 st.plotly_chart(fig)
